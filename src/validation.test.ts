@@ -1,5 +1,4 @@
-import { validateUserId } from './validation'; // Wstaw tutaj ścieżkę do pliku zawierającego funkcję walidującą
-
+import { validateUserId } from './validation'; 
 describe('validateUserId', () => {
   it('should return true for a valid user ID', () => {
     const userId = 'abc123';
