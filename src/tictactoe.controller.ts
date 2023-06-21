@@ -1,4 +1,5 @@
-import express, { Request, Response, NextFunction } from 'express';
+import express, { Response, NextFunction } from 'express';
+import { Request } from 'express';
 
 interface User {
   id: string;
@@ -9,14 +10,13 @@ interface User {
 }
 
 interface Game {
+  result: string;
   id: string;
   board: string[][];
   currentPlayer: User;
-  player1?: User;
-  player2?: User;
+  player1: User;
+  player2: User;
 }
-
-let gameHistory: Game[] = [];
 
 const app = express();
 app.use(express.json());
@@ -24,7 +24,15 @@ app.use(express.json());
 const users: User[] = [];
 let games: Game[] = [];
 
-const authenticateUser = (req: Request, res: Response, next: NextFunction) => {
+function generateUniqueId() {
+  return '';
+}
+
+const authenticateUser = (
+    req: Request,
+    res: Response,
+    next: NextFunction
+) => {
   const userId = req.headers['user_id'] as string;
   if (!userId) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -35,40 +43,28 @@ const authenticateUser = (req: Request, res: Response, next: NextFunction) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  req.user = user;
+  (req as AuthenticatedRequest).user = user;
   next();
 };
 
-const checkGameInProgress = (req: Request, res: Response, next: NextFunction) => {
+interface AuthenticatedRequest extends Request {
+  user?: User;
+}
+
+app.post('/game', authenticateUser, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user as User;
-  if (user.gameInProgress) {
-    return res.status(400).json({ error: 'Game already in progress' });
+  if (!user) {
+    return res.status(401).json({error: 'Unauthorized'});
   }
-
-  const gameId = req.params.gameId;
-  const game = games.find((g) => g.id === gameId);
-  if (game && game.player2) {
-    return res.status(400).json({ error: 'Opponent is still playing' });
-  }
-
-  next();
-};
-app.post('/register', (req: Request, res: Response) => {
-  // ... kod rejestracji użytkownika ...
-
-  const newUser: User = { id: generateUniqueId(), username, password, gameInProgress: false, symbol: '' };
-  users.push(newUser);
-
-  return res.status(201).json({ message: 'User registered successfully' });
-});
-app.post('/game', authenticateUser, checkGameInProgress, (req: Request, res: Response) => {
-  const user = req.user as User;
 
   const gameId = generateUniqueId();
   const game: Game = {
     id: gameId,
     board: [['', '', ''], ['', '', ''], ['', '', '']],
     currentPlayer: user,
+    result: '',
+    player1: user,
+    player2: user,
   };
   const symbols = ['X', 'O'];
   const randomIndex = Math.floor(Math.random() * symbols.length);
@@ -86,7 +82,7 @@ app.post('/game', authenticateUser, checkGameInProgress, (req: Request, res: Res
   return res.status(200).json({ gameId, symbol: user.symbol });
 });
 
-app.post('/game/:gameId/move', authenticateUser, (req: Request, res: Response) => {
+app.post('/game/:gameId/move', authenticateUser, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user as User;
   const gameId = req.params.gameId;
   const game = games.find((g) => g.id === gameId);
@@ -118,17 +114,22 @@ app.post('/game/:gameId/move', authenticateUser, (req: Request, res: Response) =
   board[row][column] = symbol;
   game.currentPlayer = game.currentPlayer === game.player1 ? game.player2! : game.player1!;
 
+  function checkGameResult(board: string[][]): string | null {
+    return null;
+  }
+
   const result = checkGameResult(board);
   if (result) {
     game.player1!.gameInProgress = false;
     game.player2!.gameInProgress = false;
     games = games.filter((g) => g.id !== gameId);
     return res.status(200).json({ message: 'Game over', result });
+  } else {
+    return res.status(200).json({ message: 'Move successfully made' });
   }
-
-  return res.status(200).json({ message: 'Move successfully made' });
 });
-app.get('/game/:gameId/board', authenticateUser, (req: Request, res: Response) => {
+
+app.get('/game/:gameId/board', authenticateUser, (req: AuthenticatedRequest, res: Response) => {
   const user = req.user as User;
   const gameId = req.params.gameId;
   const game = games.find((g) => g.id === gameId);
@@ -155,6 +156,7 @@ app.get('/users', (req: Request, res: Response) => {
 
   return res.status(200).json(userList);
 });
+const gameHistory: Game[] = [];
 
 app.get('/games/history', (req: Request, res: Response) => {
   return res.status(200).json(gameHistory);
@@ -174,25 +176,25 @@ const isGameDraw = (game: Game): boolean => {
   for (let i = 0; i < board.length; i++) {
     for (let j = 0; j < board[i].length; j++) {
       if (board[i][j] === '') {
-        return false; 
+        return false;
       }
     }
   }
 
-  return true; 
+  return true;
 };
 
 const isGameWon = (game: Game): boolean => {
   const board = game.board;
 
   const winningCombinations = [
-    [[0, 0], [0, 1], [0, 2]], 
+    [[0, 0], [0, 1], [0, 2]],
     [[1, 0], [1, 1], [1, 2]],
     [[2, 0], [2, 1], [2, 2]],
-    [[0, 0], [1, 0], [2, 0]], 
+    [[0, 0], [1, 0], [2, 0]],
     [[0, 1], [1, 1], [2, 1]],
     [[0, 2], [1, 2], [2, 2]],
-    [[0, 0], [1, 1], [2, 2]], 
+    [[0, 0], [1, 1], [2, 2]],
     [[0, 2], [1, 1], [2, 0]],
   ];
 
@@ -202,23 +204,29 @@ const isGameWon = (game: Game): boolean => {
     const [i3, j3] = combination[2];
 
     if (
-      board[i1][j1] !== '' &&
-      board[i1][j1] === board[i2][j2] &&
-      board[i1][j1] === board[i3][j3]
+        board[i1][j1] !== '' &&
+        board[i1][j1] === board[i2][j2] &&
+        board[i1][j1] === board[i3][j3]
     ) {
-      return true; 
+      return true;
     }
   }
 
-  return false; 
+  return false;
 };
 
 const isGameEnded = (game: Game): boolean => {
   return isGameWon(game) || isGameDraw(game);
 };
 
+const handleDraw = (game: Game) => {
+};
+
+const handleWin = (game: Game) => {
+};
+
 const endGame = (game: Game) => {
- const gameIndex = games.findIndex((g) => g.id === game.id);
+  const gameIndex = games.findIndex((g) => g.id === game.id);
 
   if (gameIndex === -1) {
     return;
@@ -234,25 +242,16 @@ const endGame = (game: Game) => {
   }
 
   if (isGameWon(game)) {
-
     game.result = 'win';
-
-    console.log('Won!');  
-    
+    console.log('Won!');
     handleWin(game);
-
-  }
-  else if (isGameDraw(game)) {
-
+  } else if (isGameDraw(game)) {
     game.result = 'draw';
-
-    console.log('Draw!');  
-    
+    console.log('Draw!');
     handleDraw(game);
   }
 
   saveGameToHistory(game);
-
 };
 
 app.listen(3000, () => {
